@@ -1,10 +1,10 @@
 #!/bin/bash
 # claude-rename installer — sets up the auto-naming hook for Claude Code
-# Usage: curl -sL https://raw.githubusercontent.com/sathwick-p/claude-rename/main/install.sh | bash
+# Usage: curl -sL https://raw.githubusercontent.com/AKett93/claude-session-rename/main/install.sh | bash
 
 set -euo pipefail
 
-REPO="sathwick-p/claude-rename"
+REPO="AKett93/claude-session-rename"
 
 # Fetch the latest release tag from GitHub API
 LATEST_TAG="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).tag_name||"")}catch{}})' 2>/dev/null || true)"
@@ -125,5 +125,5 @@ echo "Done! New sessions will be auto-named after the first exchange."
 echo "No API key needed — uses your existing Claude Code subscription."
 echo ""
 echo "For CLI tools (list, backfill, rename), run:"
-echo "  npx github:sathwick-p/claude-rename <command>"
+echo "  npx github:AKett93/claude-session-rename <command>"
 echo ""
