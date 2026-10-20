@@ -7,7 +7,7 @@ set -euo pipefail
 REPO="sathwick-p/claude-rename"
 
 # Fetch the latest release tag from GitHub API
-LATEST_TAG="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+LATEST_TAG="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).tag_name||"")}catch{}})' 2>/dev/null || true)"
 if [ -z "$LATEST_TAG" ]; then
   LATEST_TAG="main"
   echo "  Could not determine latest release, using main branch"
@@ -36,7 +36,12 @@ echo ""
 # 1. Download hook files
 mkdir -p "$HOOK_DIR"
 curl -fsSL "$HOOK_URL" -o "$HOOK_FILE"
-echo "  Hook downloaded to $HOOK_FILE"
+# Stamp the installed version so `claude-rename status` can report it
+"$DETECTED_NODE" -e "
+const fs=require('fs');const p=process.argv[1];
+fs.writeFileSync(p, fs.readFileSync(p,'utf-8').replace('__CLAUDE_RENAME_VERSION__', process.argv[2]));
+" "$HOOK_FILE" "$LATEST_TAG"
+echo "  Hook ($LATEST_TAG) downloaded to $HOOK_FILE"
 curl -fsSL "$PROMPT_URL" -o "$PROMPT_FILE"
 echo "  Prompt helper downloaded to $PROMPT_FILE"
 

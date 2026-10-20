@@ -41,10 +41,11 @@ claude-rename install
 
 1. A **Stop hook** fires after each Claude Code assistant turn
 2. On the **first meaningful exchange** of a new session, it spawns a **background worker**
-3. The worker runs `claude -p` to generate a concise 3-6 word title (max 50 chars)
+3. The worker runs `claude -p` (no tools, no settings, no session persistence) to generate a concise 3-6 word title (max 50 chars)
 4. The title is written to the session file — appears in `claude --resume`
 5. **Completely silent** — the hook never shows any output to the user
 6. **Idempotent** — only names each session once, subsequent turns are a no-op
+7. **Self-healing** — if a worker dies, the session is retried after 5 minutes rather than left untitled
 
 ## Commands
 
@@ -112,7 +113,7 @@ claude-rename backfill --project my-project
 
 ## Session storage
 
-Claude Code stores sessions at `~/.claude/projects/<encoded-path>/<uuid>.jsonl`. The tool now preserves the stored project directory as-is instead of trying to reverse that encoding. Titles are written as:
+Claude Code stores sessions at `~/.claude/projects/<encoded-path>/<uuid>.jsonl`. The hook uses the `transcript_path` Claude Code passes it and never tries to reproduce that encoding. Titles are written as:
 
 ```json
 {"type":"custom-title","customTitle":"fix-stripe-webhook-retry","sessionId":"abc-123-..."}
@@ -130,7 +131,7 @@ This is the same format Claude Code's built-in `/rename` command uses.
 | `~/.claude/settings.json` | Hook registration (modified during install) |
 | `~/.claude-rename.log` | Debug log (append-only) |
 | `~/.claude-rename.json` | Config (optional — set default model) |
-| `~/.claude/.session-namer-named/` | Marker files for idempotency |
+| `~/.claude/.session-namer-named/` | Marker files for idempotency (orphans pruned by `status`) |
 
 ## Uninstalling
 
