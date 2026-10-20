@@ -4,9 +4,29 @@
  */
 
 import { spawn } from "child_process";
-import { existsSync, mkdirSync, rmSync } from "fs";
+import { appendFileSync } from "fs";
 import { join } from "path";
 import { homedir, tmpdir } from "os";
+
+const LOG_FILE = join(homedir(), ".claude-rename.log");
+
+// Flags passed to every `claude -p` worker call:
+//   --no-session-persistence  worker never writes a session file, so it
+//                             cannot appear in `claude --resume`
+//   --tools ""                no tools: a titling prompt must never run
+//                             Bash, read files, or trigger hooks
+//   --setting-sources ""      ignore the user's settings, hooks, MCP servers
+//                             and CLAUDE.md so the worker is fast and isolated
+export const WORKER_CLI_FLAGS = [
+  "--no-session-persistence",
+  "--tools",
+  "",
+  "--setting-sources",
+  "",
+];
+
+// Run from the OS temp dir so a stray cwd-relative read hits nothing useful.
+const WORKER_CWD = tmpdir();
 
 const TITLE_PROMPT_RULES = `Rules:
 - 3-6 words, kebab-case, lowercase, max 50 characters
@@ -15,11 +35,6 @@ const TITLE_PROMPT_RULES = `Rules:
 - Never include URLs, file paths, or generic words like "help", "work", "session", "project"
 - Good: "fix-stripe-webhook-retry", "k8s-helm-ingress-setup", "refactor-auth-middleware"
 - Bad: "coding-session", "helping-with-code", "read-and-understand-repo"`;
-
-// Dedicated temp directory for claude -p worker sessions.
-// Sessions created here are cleaned up after each call so they
-// never appear in the user's `claude --resume` list.
-const WORKER_CWD = join(tmpdir(), "claude-rename-worker");
 
 export function buildTitlePrompt(userMessages, assistantMessages, options = {}) {
   const {
@@ -76,72 +91,67 @@ export function normalizeGeneratedTitle(rawOutput) {
 
 /**
  * Run `claude -p --model <model>` with the given prompt piped via stdin.
- * Runs from a temp directory and cleans up the session file afterwards
- * so worker sessions never appear in the user's `claude --resume` list.
+ * The worker runs with no tools, no settings and no session persistence,
+ * so it is isolated from the user's environment and leaves nothing behind.
  *
  * @param {string} prompt - The prompt to send
  * @param {string} model - Model name (e.g. "haiku", "sonnet")
+ * @param {number} [timeoutMs=30000]
  * @returns {Promise<string|null>} Normalized kebab-case title, or null
  */
-export function generateTitleViaCLI(prompt, model) {
-  mkdirSync(WORKER_CWD, { recursive: true });
-
+export function generateTitleViaCLI(prompt, model, timeoutMs = 30000) {
   return new Promise((resolve) => {
     let stdout = "";
+    let stderr = "";
     let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
 
-    const child = spawn("claude", ["-p", "--model", model], {
+    const child = spawn("claude", ["-p", "--model", model, ...WORKER_CLI_FLAGS], {
       cwd: WORKER_CWD,
       stdio: ["pipe", "pipe", "pipe"],
     });
 
     const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill();
-        cleanupWorkerSessions();
-        resolve(null);
-      }
-    }, 30000);
+      child.kill();
+      log(`claude -p timed out after ${timeoutMs}ms (model=${model})`);
+      finish(null);
+    }, timeoutMs);
 
     child.stdout.on("data", (data) => {
       stdout += data.toString();
     });
-
-    child.on("close", () => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        cleanupWorkerSessions();
-        resolve(normalizeGeneratedTitle(stdout));
-      }
+    child.stderr.on("data", (data) => {
+      stderr += data.toString();
     });
 
-    child.on("error", () => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        cleanupWorkerSessions();
-        resolve(null);
+    child.on("close", (code) => {
+      const title = normalizeGeneratedTitle(stdout);
+      if (!title) {
+        log(
+          `Title rejected (exit=${code}, model=${model}) stdout=${JSON.stringify(stdout.slice(0, 200))} stderr=${JSON.stringify(stderr.slice(0, 200))}`,
+        );
       }
+      finish(title);
     });
 
+    child.on("error", (err) => {
+      log(`claude -p failed to start: ${err.message}`);
+      finish(null);
+    });
+
+    child.stdin.on("error", () => {});
     child.stdin.write(prompt);
     child.stdin.end();
   });
 }
 
-/**
- * Remove session files created by `claude -p` in the worker directory.
- * The project directory is derived from WORKER_CWD the same way Claude Code
- * encodes cwd paths: replace / with -.
- */
-function cleanupWorkerSessions() {
+function log(msg) {
   try {
-    const encoded = WORKER_CWD.replace(/\//g, "-");
-    const projectDir = join(homedir(), ".claude", "projects", encoded);
-    if (existsSync(projectDir)) {
-      rmSync(projectDir, { recursive: true, force: true });
-    }
+    appendFileSync(LOG_FILE, `${new Date().toISOString()} ${msg}\n`);
   } catch {}
 }
