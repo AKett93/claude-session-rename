@@ -348,3 +348,39 @@ test("worker CLI flags isolate the titling call", async () => {
   const settingsIdx = WORKER_CLI_FLAGS.indexOf("--setting-sources");
   assert.strictEqual(WORKER_CLI_FLAGS[settingsIdx + 1], "");
 });
+
+// ─── marker lifecycle ────────────────────────────────────────────────────────
+
+test("isMarkerStale: fresh naming marker is not stale, done marker never is", async () => {
+  const { isMarkerStale, STALE_MARKER_MS } = await import("../src/hook.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "markers-"));
+  const naming = join(dir, "naming");
+  const done = join(dir, "done");
+  writeFileSync(naming, "naming");
+  writeFileSync(done, "done");
+  assert.equal(isMarkerStale(naming), false);
+  assert.equal(isMarkerStale(naming, Date.now() + STALE_MARKER_MS + 1000), true);
+  assert.equal(isMarkerStale(done, Date.now() + STALE_MARKER_MS + 1000), false);
+  assert.equal(isMarkerStale(join(dir, "missing")), false);
+});
+
+test("status prunes orphaned markers and keeps live ones", () => {
+  const markerDir = join(homeDir, ".claude", ".session-namer-named");
+  mkdirSync(markerDir, { recursive: true });
+  const projectPath = join(homeDir, ".claude", "projects", "Users-alice-markers");
+  mkdirSync(projectPath, { recursive: true });
+  const live = "33333333-3333-3333-3333-333333333333";
+  const orphan = "44444444-4444-4444-4444-444444444444";
+  writeFileSync(join(projectPath, `${live}.jsonl`), "");
+  writeFileSync(join(markerDir, live), "done");
+  writeFileSync(join(markerDir, orphan), "done");
+
+  const result = spawnSync(process.execPath, [binPath, "status"], {
+    encoding: "utf-8",
+    env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /orphaned markers removed/);
+  assert.ok(existsSync(join(markerDir, live)));
+  assert.ok(!existsSync(join(markerDir, orphan)));
+});

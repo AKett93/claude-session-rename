@@ -19,6 +19,7 @@ import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
 import { discoverSessions, parseSession } from "../src/sessions.mjs";
 import { generateTitle } from "../src/namer.mjs";
+import { isMarkerStale } from "../src/hook.mjs";
 
 const VALID_MODELS = ["haiku", "sonnet", "opus"];
 const DEFAULT_MODEL = "haiku";
@@ -320,6 +321,7 @@ async function cmdBackfill() {
   const CONCURRENCY = model === "opus" ? 3 : 10;
   let named = 0;
   let failed = 0;
+  const failures = [];
 
   for (let i = 0; i < untitled.length; i += CONCURRENCY) {
     const batch = untitled.slice(i, i + CONCURRENCY);
@@ -334,6 +336,7 @@ async function cmdBackfill() {
 
       if (!result) {
         failed++;
+        failures.push(session.sessionId);
         return;
       }
 
@@ -361,8 +364,13 @@ async function cmdBackfill() {
   }
 
   console.log(
-    `\n${dryRun ? "[DRY RUN] Would have named" : "Named"} ${named} sessions. ${failed} skipped.\n`,
+    `\n${dryRun ? "[DRY RUN] Would name" : "Named"} ${named} of ${untitled.length} sessions.` +
+      (failed ? ` ${failed} failed (no usable title from the model; see ~/.claude-rename.log).` : "") +
+      "\n",
   );
+  if (failed && failed <= 10) {
+    for (const id of failures) console.log(`  failed: ${id}`);
+  }
 }
 
 // ─── Rename ──────────────────────────────────────────────────────────────────
@@ -447,15 +455,46 @@ function cmdStatus() {
   }
   console.log(`  Sessions:      ${sessions.length} total, ${titled} named, ${sessions.length - titled} untitled`);
 
-  let markerCount = 0;
-  if (existsSync(MARKER_DIR)) {
-    try {
-      markerCount = readdirSync(MARKER_DIR).length;
-    } catch {}
-  }
-  console.log(`  Marker files:  ${markerCount}`);
+  const { kept, pruned, stale } = pruneMarkers(new Set(sessions.map((s) => s.sessionId)));
+  console.log(
+    `  Marker files:  ${kept}` +
+      (pruned ? ` (${pruned} orphaned markers removed)` : "") +
+      (stale ? ` (${stale} stale "naming" markers will be retried)` : ""),
+  );
 
   console.log("");
+}
+
+// ─── Markers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Remove marker files whose session no longer exists. Returns counts of
+ * markers kept, pruned, and stale (still "naming" but older than STALE_MARKER_MS).
+ */
+function pruneMarkers(liveSessionIds) {
+  const result = { kept: 0, pruned: 0, stale: 0 };
+  if (!existsSync(MARKER_DIR)) return result;
+  let names;
+  try {
+    names = readdirSync(MARKER_DIR);
+  } catch {
+    return result;
+  }
+  for (const name of names) {
+    const p = join(MARKER_DIR, name);
+    if (!liveSessionIds.has(name)) {
+      try {
+        unlinkSync(p);
+        result.pruned++;
+      } catch {
+        result.kept++;
+      }
+      continue;
+    }
+    result.kept++;
+    if (isMarkerStale(p)) result.stale++;
+  }
+  return result;
 }
 
 // ─── Help ────────────────────────────────────────────────────────────────────
