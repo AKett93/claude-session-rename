@@ -28,10 +28,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sathwick-p/claude-rename.git"
+    "url": "https://github.com/AKett93/claude-session-rename.git"
   },
-  "homepage": "https://github.com/sathwick-p/claude-rename#readme",
+  "homepage": "https://github.com/AKett93/claude-session-rename#readme",
   "bugs": {
-    "url": "https://github.com/sathwick-p/claude-rename/issues"
+    "url": "https://github.com/AKett93/claude-session-rename/issues"
   }
 }

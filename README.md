@@ -2,6 +2,8 @@
 
 Auto-name your Claude Code sessions with descriptive, AI-powered titles.
 
+Fork of [sathwick-p/claude-rename](https://github.com/sathwick-p/claude-rename) with a hardened `claude -p` worker, self-healing session markers, and a version-stamped installer.
+
 **Before:** `claude --resume` shows `"i need to write some sort of..."` truncated gibberish.
 
 **After:** `claude --resume` shows `"fix-stripe-webhook-retry"`, `"k8s-helm-ingress-setup"`, `"refactor-auth-middleware"`.
@@ -13,7 +15,7 @@ Auto-name your Claude Code sessions with descriptive, AI-powered titles.
 ### One-liner (just the hook)
 
 ```bash
-curl -sL https://raw.githubusercontent.com/sathwick-p/claude-rename/main/install.sh | bash
+curl -sL https://raw.githubusercontent.com/AKett93/claude-session-rename/main/install.sh | bash
 ```
 
 This downloads the hook file plus its shared prompt helper, then registers the hook in your Claude Code settings. That's it — new sessions auto-name themselves.
@@ -22,17 +24,17 @@ This downloads the hook file plus its shared prompt helper, then registers the h
 
 ```bash
 # Run any command directly from GitHub:
-npx github:sathwick-p/claude-rename install
-npx github:sathwick-p/claude-rename list
-npx github:sathwick-p/claude-rename backfill
-npx github:sathwick-p/claude-rename status
+npx github:AKett93/claude-session-rename install
+npx github:AKett93/claude-session-rename list
+npx github:AKett93/claude-session-rename backfill
+npx github:AKett93/claude-session-rename status
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/sathwick-p/claude-rename.git
-cd claude-rename
+git clone https://github.com/AKett93/claude-session-rename.git
+cd claude-session-rename
 npm link           # makes `claude-rename` available globally
 claude-rename install
 ```

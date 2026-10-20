@@ -544,7 +544,7 @@ Config:
   Set default model in ~/.claude-rename.json: {"model": "haiku"}
 
 Setup:
-  1. npx github:sathwick-p/claude-rename install
+  1. npx github:AKett93/claude-session-rename install
      (or: git clone, then npm link, then claude-rename install)
   2. Start using Claude Code — sessions auto-name themselves!
   3. claude-rename backfill   (to name existing sessions)
