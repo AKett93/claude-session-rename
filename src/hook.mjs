@@ -37,9 +37,16 @@ import { join } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
-import { buildTitlePrompt, generateTitleViaCLI } from "./title-prompt.mjs";
+import {
+  buildTitlePrompt,
+  generateTitleViaCLI,
+  parseResumePrompt,
+  assignChainPart,
+  formatChainTitle,
+} from "./title-prompt.mjs";
 
 const MARKER_DIR = join(homedir(), ".claude", ".session-namer-named");
+const CHAIN_REGISTRY = join(homedir(), ".claude", ".session-namer-chains.json");
 const LOG_FILE = join(homedir(), ".claude-rename.log");
 // A "naming" marker older than this is treated as abandoned and retried.
 // The worker's own claude -p timeout is 30s, so 5 minutes is generous.
@@ -186,7 +193,9 @@ async function nameSessionAI(sessionId, jsonlPath) {
   if (userMessages.length === 0) return;
 
   const model = getConfigModel();
-  const title = await generateTitleViaClaude(userMessages, assistantMessages, model);
+  const isChain = parseResumePrompt(userMessages[0]) !== null;
+  const topic = await generateTitleViaClaude(userMessages, assistantMessages, model, isChain);
+  const title = topic && chainTitleFor(userMessages, sessionId, topic);
   if (title) {
     writeTitle(jsonlPath, sessionId, title);
     markDone(join(MARKER_DIR, sessionId));
@@ -206,11 +215,23 @@ export function getConfigModel() {
   }
 }
 
-function generateTitleViaClaude(userMessages, assistantMessages, model) {
+function generateTitleViaClaude(userMessages, assistantMessages, model, chain = false) {
   const prompt = buildTitlePrompt(userMessages, assistantMessages, {
     replyInstruction: "Reply with ONLY the title, nothing else",
+    chain,
   });
   return generateTitleViaCLI(prompt, model);
+}
+
+/**
+ * Turn a generated topic into the final title. Sessions that open with a
+ * resume prompt get `<chain> #<n> · <topic>`; all others keep the bare topic.
+ */
+export function chainTitleFor(userMessages, sessionId, topic, registryPath = CHAIN_REGISTRY) {
+  const resume = parseResumePrompt(userMessages[0]);
+  if (!resume) return topic;
+  const part = assignChainPart(registryPath, resume.chain, sessionId, resume.part);
+  return formatChainTitle(resume.chain, part, topic);
 }
 
 // ─── Stdin Reader ────────────────────────────────────────────────────────────

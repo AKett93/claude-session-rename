@@ -49,6 +49,16 @@ claude-rename install
 6. **Idempotent** — only names each session once, subsequent turns are a no-op
 7. **Self-healing** — if a worker dies, the session is retried after 5 minutes rather than left untitled
 
+### Session chains
+
+When a long task is handed over from one session to the next through a checkpoint file, start the new session with a resume prompt:
+
+```text
+Resume [infra-migration #3] from /home/me/notes/infra-migration-checkpoint.md
+```
+
+The session is titled `infra-migration #3 · <topic>`, where the topic describes the checkpoint's objective. The tag is optional: `Resume from /path/infra-migration-checkpoint.md` takes the chain name from the file name (without `-checkpoint`), and the part number continues from the last one recorded in `~/.claude/.session-namer-chains.json`. The checkpoint path must not contain spaces.
+
 ## Commands
 
 | Command | Description |
@@ -134,6 +144,7 @@ This is the same format Claude Code's built-in `/rename` command uses.
 | `~/.claude-rename.log` | Debug log (append-only) |
 | `~/.claude-rename.json` | Config (optional — set default model) |
 | `~/.claude/.session-namer-named/` | Marker files for idempotency (orphans pruned by `status`) |
+| `~/.claude/.session-namer-chains.json` | Part numbers for session chains (chain → session ID → part) |
 
 ## Uninstalling
 
