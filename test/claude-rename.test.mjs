@@ -339,3 +339,12 @@ test("backfill accepts full claude model IDs", () => {
 
   assert.equal(result.status, 0);
 });
+
+test("worker CLI flags isolate the titling call", async () => {
+  const { WORKER_CLI_FLAGS } = await import("../src/title-prompt.mjs");
+  assert.ok(WORKER_CLI_FLAGS.includes("--no-session-persistence"));
+  const toolsIdx = WORKER_CLI_FLAGS.indexOf("--tools");
+  assert.strictEqual(WORKER_CLI_FLAGS[toolsIdx + 1], "");
+  const settingsIdx = WORKER_CLI_FLAGS.indexOf("--setting-sources");
+  assert.strictEqual(WORKER_CLI_FLAGS[settingsIdx + 1], "");
+});
