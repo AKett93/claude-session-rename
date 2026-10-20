@@ -37,11 +37,16 @@ import { buildTitlePrompt, generateTitleViaCLI } from "./title-prompt.mjs";
 
 const MARKER_DIR = join(homedir(), ".claude", ".session-namer-named");
 const LOG_FILE = join(homedir(), ".claude-rename.log");
+// A "naming" marker older than this is treated as abandoned and retried.
+// The worker's own claude -p timeout is 30s, so 5 minutes is generous.
+export const STALE_MARKER_MS = 5 * 60 * 1000;
 
 // ─── Background Worker Mode ─────────────────────────────────────────────────
 // When invoked with --name, we're the background worker doing AI naming via claude -p.
 
-if (process.argv.includes("--name")) {
+const IS_MAIN = Boolean(process.argv[1]) && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (IS_MAIN && process.argv.includes("--name")) {
   const idx = process.argv.indexOf("--name");
   const sessionId = process.argv[idx + 1];
   const jsonlPath = process.argv[idx + 2];
@@ -131,8 +136,10 @@ async function main() {
       return;
     }
 
-    // Already spawned a worker? Don't spawn another.
-    if (existsSync(markerPath)) {
+    // Already spawned a worker? Don't spawn another — unless the marker is
+    // stale (worker crashed, timed out, or the machine slept), in which case
+    // retry so the session doesn't stay untitled forever.
+    if (existsSync(markerPath) && !isMarkerStale(markerPath)) {
       output();
       return;
     }
@@ -253,6 +260,15 @@ function getSessionJsonlPath(cwd, sessionId) {
 function isMarkerDone(markerPath) {
   try {
     return readFileSync(markerPath, "utf-8").trim() === "done";
+  } catch {
+    return false;
+  }
+}
+
+export function isMarkerStale(markerPath, now = Date.now()) {
+  try {
+    if (readFileSync(markerPath, "utf-8").trim() === "done") return false;
+    return now - statSync(markerPath).mtimeMs > STALE_MARKER_MS;
   } catch {
     return false;
   }
@@ -396,6 +412,6 @@ function output() {
 
 // ─── Entry ───────────────────────────────────────────────────────────────────
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (IS_MAIN) {
   main();
 }
