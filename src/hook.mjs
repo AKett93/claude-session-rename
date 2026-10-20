@@ -18,6 +18,10 @@
  * This file is copied to ~/.claude/hooks/ together with title-prompt.mjs.
  */
 
+// Stamped at install time so `claude-rename status` can report which
+// version of the hook is actually installed. Keep this line intact.
+export const HOOK_VERSION = "__CLAUDE_RENAME_VERSION__";
+
 import {
   readFileSync,
   writeFileSync,
@@ -75,7 +79,6 @@ async function main() {
     }
 
     const sessionId = data.sessionId || data.session_id || "";
-    const cwd = data.cwd || data.directory || "";
     if (data.stop_hook_active) {
       output();
       return;
@@ -97,15 +100,21 @@ async function main() {
       return;
     }
 
-    if (!sessionId || !cwd) {
+    if (!sessionId) {
       output();
       return;
     }
 
     const markerPath = join(MARKER_DIR, sessionId);
-    const jsonlPath =
-      resolveTranscriptPath(data.transcript_path || data.transcriptPath) ||
-      getSessionJsonlPath(cwd, sessionId);
+    // Claude Code always supplies transcript_path to hooks. We used to fall
+    // back to re-deriving it from cwd, but that required reproducing Claude
+    // Code's private path-encoding scheme, which has changed and differs per
+    // platform. If it's absent we simply skip.
+    const jsonlPath = resolveTranscriptPath(data.transcript_path || data.transcriptPath);
+    if (!jsonlPath) {
+      output();
+      return;
+    }
 
     // Already fully named? (marker contains "done")
     if (isMarkerDone(markerPath)) {
@@ -244,15 +253,6 @@ function resolveTranscriptPath(transcriptPath) {
     return join(homedir(), transcriptPath.slice(2));
   }
   return transcriptPath;
-}
-
-function cwdToProjectDir(cwd) {
-  return cwd.replace(/\//g, "-");
-}
-
-function getSessionJsonlPath(cwd, sessionId) {
-  const encoded = cwdToProjectDir(cwd);
-  return join(homedir(), ".claude", "projects", encoded, `${sessionId}.jsonl`);
 }
 
 // ─── Idempotency ─────────────────────────────────────────────────────────────

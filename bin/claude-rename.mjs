@@ -21,8 +21,10 @@ import { discoverSessions, parseSession } from "../src/sessions.mjs";
 import { generateTitle } from "../src/namer.mjs";
 import { isMarkerStale } from "../src/hook.mjs";
 
-const VALID_MODELS = ["haiku", "sonnet", "opus"];
 const DEFAULT_MODEL = "haiku";
+const PKG_VERSION = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf-8"),
+).version;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -149,8 +151,11 @@ function cmdInstall() {
   // 1. Copy hook files and generate runner script
   const hooksDir = join(homedir(), ".claude", "hooks");
   mkdirSync(hooksDir, { recursive: true });
-  copyFileSync(HOOK_SOURCE, HOOK_DEST);
-  console.log(`  Hook copied to ${HOOK_DEST}`);
+  writeFileSync(
+    HOOK_DEST,
+    readFileSync(HOOK_SOURCE, "utf-8").replace("__CLAUDE_RENAME_VERSION__", PKG_VERSION),
+  );
+  console.log(`  Hook v${PKG_VERSION} copied to ${HOOK_DEST}`);
   copyFileSync(PROMPT_SOURCE, PROMPT_DEST);
   console.log(`  Prompt helper copied to ${PROMPT_DEST}`);
   writeFileSync(RUNNER_DEST, generateRunnerScript());
@@ -297,8 +302,10 @@ async function cmdBackfill() {
   const model = getFlag("--model") || DEFAULT_MODEL;
   const sessions = discoverSessions(filter);
 
-  if (!VALID_MODELS.includes(model) && !model.startsWith("claude-")) {
-    console.error(`Unknown model: ${model}. Valid shortcuts: ${VALID_MODELS.join(", ")}\n`);
+  // Model aliases change as Claude Code ships new models, so we only reject
+  // values that cannot be a model name; `claude` itself validates the rest.
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(model)) {
+    console.error(`Invalid model name: ${model}\n`);
     process.exit(1);
   }
 
@@ -419,7 +426,13 @@ function cmdStatus() {
   console.log("claude-rename status\n");
 
   const hookInstalled = existsSync(HOOK_DEST);
-  console.log(`  Hook file:     ${hookInstalled ? "installed" : "not installed"}`);
+  let hookVersion = "";
+  if (hookInstalled) {
+    const m = readFileSync(HOOK_DEST, "utf-8").match(/HOOK_VERSION = "([^"]*)"/);
+    hookVersion = m && !m[1].startsWith("__") ? m[1] : "unknown";
+    if (hookVersion !== PKG_VERSION) hookVersion += ` (this CLI is v${PKG_VERSION}; re-run install to update)`;
+  }
+  console.log(`  Hook file:     ${hookInstalled ? `installed, v${hookVersion}` : "not installed"}`);
   const promptInstalled = existsSync(PROMPT_DEST);
   console.log(`  Prompt helper: ${promptInstalled ? "installed" : "not installed"}`);
   const runnerInstalled = existsSync(RUNNER_DEST);
@@ -516,7 +529,7 @@ Models:
   haiku   (default) — fast and cheap, good for bulk backfill
   sonnet  — balanced quality and speed
   opus    — highest quality titles
-  Or pass a full model ID: claude-haiku-4-5-20251001
+  Any alias or full model ID that 'claude --model' accepts also works.
 
 How it works:
   After installation, a Stop hook fires after each Claude Code turn.
@@ -531,10 +544,10 @@ Config:
   Set default model in ~/.claude-rename.json: {"model": "haiku"}
 
 Setup:
-  1. npm install -g claude-rename
-  2. claude-rename install
-  3. Start using Claude Code — sessions auto-name themselves!
-  4. claude-rename backfill   (to name existing sessions)
+  1. npx github:sathwick-p/claude-rename install
+     (or: git clone, then npm link, then claude-rename install)
+  2. Start using Claude Code — sessions auto-name themselves!
+  3. claude-rename backfill   (to name existing sessions)
 `);
 }
 

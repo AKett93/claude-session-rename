@@ -311,13 +311,13 @@ test("rename requires an exact session id match", () => {
 // ─── backfill model validation (CLI) ─────────────────────────────────────────
 
 test("backfill rejects invalid model names", () => {
-  const result = spawnSync(process.execPath, [binPath, "backfill", "--model", "gpt-4"], {
+  const result = spawnSync(process.execPath, [binPath, "backfill", "--model", "not a model!"], {
     env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir },
     encoding: "utf-8",
   });
 
   assert.notEqual(result.status, 0);
-  assert.ok(result.stderr.includes("Unknown model"));
+  assert.ok(result.stderr.includes("Invalid model name"));
 });
 
 test("backfill accepts valid model shortcuts", () => {
@@ -383,4 +383,29 @@ test("status prunes orphaned markers and keeps live ones", () => {
   assert.match(result.stdout, /orphaned markers removed/);
   assert.ok(existsSync(join(markerDir, live)));
   assert.ok(!existsSync(join(markerDir, orphan)));
+});
+
+// ─── install / uninstall (CLI) ───────────────────────────────────────────────
+
+test("install stamps the hook version, registers the hook, and uninstall reverts", () => {
+  const home = mkdtempSync(join(tmpdir(), "claude-rename-install-"));
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  const pkgVersion = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf-8")).version;
+
+  let r = spawnSync(process.execPath, [binPath, "install"], { env, encoding: "utf-8" });
+  assert.equal(r.status, 0, r.stderr);
+  const hook = readFileSync(join(home, ".claude", "hooks", "claude-rename.mjs"), "utf-8");
+  assert.ok(hook.includes(`HOOK_VERSION = "${pkgVersion}"`));
+  assert.ok(!hook.includes("__CLAUDE_RENAME_VERSION__"));
+  assert.ok(existsSync(join(home, ".claude", "hooks", "title-prompt.mjs")));
+  const settings = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf-8"));
+  assert.equal(settings.hooks.Stop.length, 1);
+
+  r = spawnSync(process.execPath, [binPath, "status"], { env, encoding: "utf-8" });
+  assert.match(r.stdout, new RegExp(`installed, v${pkgVersion.replace(/\\./g, "\\\\.")}`));
+
+  r = spawnSync(process.execPath, [binPath, "uninstall"], { env, encoding: "utf-8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!existsSync(join(home, ".claude", "hooks", "claude-rename.mjs")));
+  assert.equal(JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf-8")).hooks.Stop.length, 0);
 });
