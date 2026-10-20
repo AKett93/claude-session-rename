@@ -4,8 +4,8 @@
  */
 
 import { spawn } from "child_process";
-import { appendFileSync } from "fs";
-import { join } from "path";
+import { appendFileSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join, dirname } from "path";
 import { homedir, tmpdir } from "os";
 
 const LOG_FILE = join(homedir(), ".claude-rename.log");
@@ -36,10 +36,13 @@ const TITLE_PROMPT_RULES = `Rules:
 - Good: "fix-stripe-webhook-retry", "k8s-helm-ingress-setup", "refactor-auth-middleware"
 - Bad: "coding-session", "helping-with-code", "read-and-understand-repo"`;
 
+const CHAIN_PROMPT_RULE = `- This session resumes from a checkpoint file: title the OBJECTIVE of the work, not the resume instruction or the first check`;
+
 export function buildTitlePrompt(userMessages, assistantMessages, options = {}) {
   const {
     replyInstruction = "Reply with ONLY the title, nothing else",
     includeQuotesNote = false,
+    chain = false,
   } = options;
 
   const userContext = userMessages.slice(0, 3).join("\n\n").slice(0, 1500);
@@ -54,7 +57,7 @@ export function buildTitlePrompt(userMessages, assistantMessages, options = {}) 
 
   return `You generate short session titles for Claude Code conversations.
 
-${TITLE_PROMPT_RULES}
+${TITLE_PROMPT_RULES}${chain ? `\n${CHAIN_PROMPT_RULE}` : ""}
 - ${replyLine}
 
 User messages:
@@ -87,6 +90,65 @@ export function normalizeGeneratedTitle(rawOutput) {
   }
 
   return null;
+}
+
+// ─── Session chains ──────────────────────────────────────────────────────────
+// A chain is a run of sessions linked by checkpoint handoffs. The resume
+// prompt names it: `Resume [<chain> #<n>] from <path>.md`, or just
+// `Resume from <path>.md`, where the chain is the file name minus "-checkpoint".
+
+const RESUME_RE = /^Resume (?:\[([^\]]+)\] )?from (\S+\.md)(?=\s|$)/;
+
+export function parseResumePrompt(text) {
+  if (typeof text !== "string") return null;
+  const match = text.trim().match(RESUME_RE);
+  if (!match) return null;
+  const [, tag, checkpointPath] = match;
+
+  let chain;
+  let part = null;
+  if (tag) {
+    const tagged = tag.trim().match(/^(.*?)(?:\s+#(\d+))?$/);
+    chain = tagged[1].trim();
+    if (tagged[2]) part = Number(tagged[2]);
+  } else {
+    const file = checkpointPath.split(/[\\/]/).pop();
+    chain = file.replace(/\.md$/i, "").replace(/-checkpoint$/i, "").toLowerCase();
+  }
+  if (!chain) return null;
+  return { chain, part, checkpointPath };
+}
+
+export function formatChainTitle(chain, part, topic) {
+  return `${chain} #${part} · ${topic}`;
+}
+
+/**
+ * Give a session its part number in a chain, recorded in a JSON registry of
+ * { chain: { sessionId: part } }. An explicit part from the resume tag wins;
+ * otherwise it is one past the highest known part, starting at #2 because the
+ * session that wrote the first checkpoint was #1. A session keeps its number.
+ */
+export function assignChainPart(registryPath, chain, sessionId, explicitPart) {
+  let registry = {};
+  try {
+    const parsed = JSON.parse(readFileSync(registryPath, "utf-8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) registry = parsed;
+  } catch {}
+
+  const parts = registry[chain] && typeof registry[chain] === "object" ? registry[chain] : {};
+  if (Number.isInteger(parts[sessionId])) return parts[sessionId];
+
+  const highest = Math.max(1, ...Object.values(parts).filter(Number.isInteger));
+  const part = Number.isInteger(explicitPart) && explicitPart > 0 ? explicitPart : highest + 1;
+  registry[chain] = { ...parts, [sessionId]: part };
+  try {
+    mkdirSync(dirname(registryPath), { recursive: true });
+    writeFileSync(registryPath, JSON.stringify(registry, null, 2) + "\n");
+  } catch (err) {
+    log(`Could not write chain registry: ${err.message}`);
+  }
+  return part;
 }
 
 /**

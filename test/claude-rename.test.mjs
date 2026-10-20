@@ -385,6 +385,82 @@ test("status prunes orphaned markers and keeps live ones", () => {
   assert.ok(!existsSync(join(markerDir, orphan)));
 });
 
+// ─── chain titles ────────────────────────────────────────────────────────────
+
+test("parseResumePrompt reads an explicit chain tag and part", async () => {
+  const { parseResumePrompt } = await import("../src/title-prompt.mjs");
+  assert.deepEqual(
+    parseResumePrompt("Resume [claude-rename-chains #2] from C:\\Users\\a\\Documents\\x-checkpoint.md (repo ...)"),
+    { chain: "claude-rename-chains", part: 2, checkpointPath: "C:\\Users\\a\\Documents\\x-checkpoint.md" },
+  );
+  assert.deepEqual(
+    parseResumePrompt("Resume [infra-migration] from /home/a/notes/plan.md"),
+    { chain: "infra-migration", part: null, checkpointPath: "/home/a/notes/plan.md" },
+  );
+});
+
+test("parseResumePrompt falls back to the checkpoint filename stem", async () => {
+  const { parseResumePrompt } = await import("../src/title-prompt.mjs");
+  assert.deepEqual(
+    parseResumePrompt("Resume from C:\\Users\\a\\Documents\\jumphost-onboarding-checkpoint.md"),
+    { chain: "jumphost-onboarding", part: null, checkpointPath: "C:\\Users\\a\\Documents\\jumphost-onboarding-checkpoint.md" },
+  );
+  assert.equal(parseResumePrompt("Resume from /tmp/Notes.md").chain, "notes");
+});
+
+test("parseResumePrompt ignores ordinary first messages", async () => {
+  const { parseResumePrompt } = await import("../src/title-prompt.mjs");
+  assert.equal(parseResumePrompt("Fix the stripe webhook"), null);
+  assert.equal(parseResumePrompt("Please resume from notes.md"), null);
+  assert.equal(parseResumePrompt("Resume from somewhere"), null);
+  assert.equal(parseResumePrompt(undefined), null);
+});
+
+test("formatChainTitle joins chain, part and topic", async () => {
+  const { formatChainTitle } = await import("../src/title-prompt.mjs");
+  assert.equal(formatChainTitle("claude-rename-chains", 2, "chain-titles"), "claude-rename-chains #2 · chain-titles");
+});
+
+test("buildTitlePrompt tells the model to title the objective for resumed chains", () => {
+  const prompt = buildTitlePrompt(["Resume [x #2] from /a/x.md"], ["ok"], { chain: true });
+  assert.match(prompt, /OBJECTIVE/);
+  assert.ok(!buildTitlePrompt(["hi"], ["ok"], {}).includes("OBJECTIVE"));
+});
+
+test("assignChainPart numbers sessions and is stable per session", async () => {
+  const { assignChainPart } = await import("../src/title-prompt.mjs");
+  const registry = join(mkdtempSync(join(tmpdir(), "chains-")), "chains.json");
+  // Untagged first resume: the session that wrote the checkpoint was #1.
+  assert.equal(assignChainPart(registry, "alpha", "s-a", null), 2);
+  assert.equal(assignChainPart(registry, "alpha", "s-b", null), 3);
+  // A retried worker for the same session gets the same part back.
+  assert.equal(assignChainPart(registry, "alpha", "s-a", null), 2);
+  // An explicit tag wins and moves the counter on.
+  assert.equal(assignChainPart(registry, "alpha", "s-c", 7), 7);
+  assert.equal(assignChainPart(registry, "alpha", "s-d", null), 8);
+  // Chains are independent.
+  assert.equal(assignChainPart(registry, "beta", "s-e", null), 2);
+  const saved = JSON.parse(readFileSync(registry, "utf-8"));
+  assert.deepEqual(saved.alpha, { "s-a": 2, "s-b": 3, "s-c": 7, "s-d": 8 });
+});
+
+test("assignChainPart recovers from a corrupt registry", async () => {
+  const { assignChainPart } = await import("../src/title-prompt.mjs");
+  const registry = join(mkdtempSync(join(tmpdir(), "chains-")), "chains.json");
+  writeFileSync(registry, "{not json");
+  assert.equal(assignChainPart(registry, "alpha", "s-a", null), 2);
+});
+
+test("chainTitleFor builds a chain title only for resume prompts", async () => {
+  const { chainTitleFor } = await import("../src/hook.mjs");
+  const registry = join(mkdtempSync(join(tmpdir(), "chains-")), "chains.json");
+  assert.equal(
+    chainTitleFor(["Resume [gamma #4] from /a/gamma-checkpoint.md"], "s-1", "add-retry-logic", registry),
+    "gamma #4 · add-retry-logic",
+  );
+  assert.equal(chainTitleFor(["Fix the webhook"], "s-2", "fix-webhook", registry), "fix-webhook");
+});
+
 // ─── install / uninstall (CLI) ───────────────────────────────────────────────
 
 test("install stamps the hook version, registers the hook, and uninstall reverts", () => {
